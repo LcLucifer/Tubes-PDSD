@@ -14,7 +14,6 @@ st.set_page_config(
     page_icon="🌊"
 )
 
-# CSS Font Biar Lebih Modern
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
@@ -24,7 +23,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Judul Utama
 st.title("🌊 WONDERFUL INDONESIA")
 st.caption("Jelajahi keindahan nusantara lewat peta interaktif.")
 
@@ -34,16 +32,23 @@ st.caption("Jelajahi keindahan nusantara lewat peta interaktif.")
 @st.cache_data
 def load_data():
     try:
-        df = pd.read_csv("data_wisata_final_banget.csv")
+        df = pd.read_csv("https://huggingface.co/spaces/xReyhan/Wisata-Indonesia/resolve/main/src/data_wisata_final_banget.csv")
+
         df = df.dropna(subset=['latitude', 'longitude'])
+
+        # Normalisasi teks
+        df['provinsi'] = df['provinsi'].astype(str).str.strip().str.title()
+        df['kategori'] = df['kategori'].astype(str).str.strip().str.title()
+
         return df
-    except:
+    except Exception as e:
+        st.error(f"Gagal load data: {e}")
         return pd.DataFrame()
 
 df = load_data()
 
 # ==========================================
-# 🔍 SIDEBAR FILTER & KONTROL
+# 🔍 SIDEBAR
 # ==========================================
 st.sidebar.title("⚙️ Menu")
 
@@ -59,27 +64,56 @@ pilih_prov = st.sidebar.multiselect("📍 Pilih Provinsi", list_prov)
 list_kat = sorted(df['kategori'].unique())
 pilih_kat = st.sidebar.multiselect("🏷️ Kategori", list_kat)
 
-# Opsi untuk menampilkan chart
+# Opsi Statistik
 tampil_chart = st.sidebar.checkbox("📊 Tampilkan Statistik")
+
+# OPSI BARU UNTUK MENAMPILKAN DATA CSV
+tampil_csv = st.sidebar.checkbox("📄 Tampilkan Data Scrapping (CSV)")
 
 st.sidebar.caption("Gunakan filter di atas untuk menyaring lokasi wisata.")
 
 # ==========================================
-# 🧮 LOGIC FILTER
+# 🧮 FILTER LOGIC
 # ==========================================
-if not pilih_prov:
-    df_filtered = df
-else:
-    df_filtered = df[df['provinsi'].isin(pilih_prov)]
+df_filtered = df.copy()
+
+if pilih_prov:
+    df_filtered = df_filtered[df_filtered['provinsi'].isin(pilih_prov)]
 
 if pilih_kat:
     df_filtered = df_filtered[df_filtered['kategori'].isin(pilih_kat)]
 
 # ==========================================
-# 🗺️ TAMPILAN MAP UTAMA
+# 📄 MENAMPILKAN DATA CSV JIKA DIPILIH
+# ==========================================
+if tampil_csv:
+
+    st.divider()
+    st.subheader("📄 Data Hasil Scrapping")
+
+    # Tampilkan tabel interaktif
+    st.dataframe(
+        df_filtered,
+        use_container_width=True,
+        height=400
+    )
+
+    # Ringkasan singkat
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.info(f"Total Data: {len(df_filtered)}")
+
+    with col2:
+        st.info(f"Total Provinsi: {df_filtered['provinsi'].nunique()}")
+
+    with col3:
+        st.info(f"Total Kategori: {df_filtered['kategori'].nunique()}")
+
+# ==========================================
+# 🗺️ MAP
 # ==========================================
 st.divider()
-
 st.subheader(f"📍 Menampilkan {len(df_filtered)} Lokasi Wisata")
 
 if not df_filtered.empty:
@@ -87,12 +121,19 @@ if not df_filtered.empty:
     center_lat = df_filtered['latitude'].mean()
     center_lon = df_filtered['longitude'].mean()
 
-    # Map menggunakan OpenStreetMap
+    zoom_level = 6
+    if pilih_prov and len(pilih_prov) == 1:
+        zoom_level = 8
+
     m = folium.Map(
         location=[center_lat, center_lon],
-        zoom_start=6,
+        zoom_start=zoom_level,
         tiles='OpenStreetMap'
     )
+
+    sw = df_filtered[['latitude', 'longitude']].min().values.tolist()
+    ne = df_filtered[['latitude', 'longitude']].max().values.tolist()
+    m.fit_bounds([sw, ne])
 
     marker_cluster = MarkerCluster().add_to(m)
 
@@ -100,44 +141,25 @@ if not df_filtered.empty:
 
         popup_html = f"""
         <div style="font-family: 'Poppins', sans-serif; width: 200px;">
-            <img src="{row.get('Image_Path', '')}"
-                 style="width: 100%; height: 120px;
-                 object-fit: cover; border-radius: 8px;
-                 margin-bottom: 8px;">
-
-            <h4 style="margin: 0; color: #0078AA;">
-                {row['nama_wisata']}
-            </h4>
-
-            <p style="margin: 5px 0 10px 0; font-size: 12px; color: gray;">
-                📍 {row['kota_kabupaten']}, {row['provinsi']}
-            </p>
-
-            <span style="
-                background-color: #0078AA;
-                color: white;
-                padding: 2px 8px;
-                border-radius: 4px;
-                font-size: 10px;">
-                {row['kategori']}
-            </span>
+            <h4>{row['nama_wisata']}</h4>
+            <p>📍 {row['kota_kabupaten']}, {row['provinsi']}</p>
+            <small>{row['kategori']}</small>
         </div>
         """
 
         folium.Marker(
             location=[row['latitude'], row['longitude']],
             tooltip=row['nama_wisata'],
-            popup=folium.Popup(popup_html, max_width=250),
-            icon=folium.Icon(color="blue", icon="info-sign")
+            popup=popup_html
         ).add_to(marker_cluster)
 
     st_folium(m, width="100%", height=600)
 
 else:
-    st.warning("Data kosong, coba atur filter lagi.")
+    st.warning("Tidak ada lokasi wisata sesuai filter.")
 
 # ==========================================
-# 📊 CHARTS (HANYA MUNCUL JIKA DIPILIH)
+# 📊 STATISTIK
 # ==========================================
 if tampil_chart:
 
@@ -146,34 +168,27 @@ if tampil_chart:
 
     if not df_filtered.empty:
 
-        chart_col1, chart_col2 = st.columns(2)
+        c1, c2 = st.columns(2)
 
-        with chart_col1:
-            # Bar Chart Provinsi
+        with c1:
             chart_data = df_filtered['provinsi'].value_counts().reset_index()
             chart_data.columns = ['Provinsi', 'Jumlah']
 
             bar = alt.Chart(chart_data).mark_bar().encode(
-                x=alt.X('Provinsi', sort='-y'),
+                x='Provinsi',
                 y='Jumlah',
-                color=alt.Color('Provinsi', legend=None),
-                tooltip=['Provinsi', 'Jumlah']
-            ).properties(title="Top Provinsi")
+                color='Provinsi'
+            )
 
             st.altair_chart(bar, use_container_width=True)
 
-        with chart_col2:
-            # Donut Chart Kategori
+        with c2:
             cat_data = df_filtered['kategori'].value_counts().reset_index()
             cat_data.columns = ['Kategori', 'Jumlah']
 
             donut = alt.Chart(cat_data).mark_arc(innerRadius=50).encode(
                 theta='Jumlah',
-                color='Kategori',
-                tooltip=['Kategori', 'Jumlah']
-            ).properties(title="Kategori Wisata")
+                color='Kategori'
+            )
 
             st.altair_chart(donut, use_container_width=True)
-
-    else:
-        st.info("Tidak ada data untuk ditampilkan pada statistik.")
